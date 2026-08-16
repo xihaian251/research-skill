@@ -1,0 +1,301 @@
+{
+  "skill": {
+    "name": "ml_paper_analyst",
+    "version": "1.0.0",
+    "display_name": "ML Paper Analyst",
+    "description": "Production-grade ML literature-analysis skill: cross-source paper search (arXiv / Semantic Scholar / HF Daily Papers), full-text extraction (ar5iv / arXiv HTML / PDF), four-aspect deep analysis, comparison matrix, BibTeX export and survey-grade literature review generation.",
+    "entrypoint": {
+      "module": "ml_paper_analyst",
+      "class": "MLPaperAnalystSkill",
+      "file": "skill.py",
+      "pipeline_method": "run",
+      "sync_wrapper": "run_sync"
+    },
+    "tags": ["machine-learning", "literature-review", "arxiv", "semantic-scholar", "research", "agent-skill"],
+    "requirements": "requirements.txt"
+  },
+  "config": {
+    "env": {
+      "SEMANTIC_SCHOLAR_API_KEY": "Optional. Raises rate limits and enables reliable enrichment.",
+      "OPENAI_API_KEY": "Optional. Enables LLM analysis; heuristic fallback otherwise.",
+      "OPENAI_BASE_URL": "Optional. Point to any OpenAI-compatible gateway (vLLM, Ollama...).",
+      "MLPA_LLM_MODEL": "Optional. Model name (default gpt-4o-mini).",
+      "MLPA_CACHE_DIR": "Optional. Disk-cache directory.",
+      "MLPA_OUTPUT_DIR": "Optional. Artifact output directory.",
+      "MLPA_ANALYSIS_MODE": "Optional. 'single' (default) or 'chain'."
+    }
+  },
+  "tools": [
+    {
+      "name": "search_ml_papers",
+      "description": "Search machine-learning papers across arXiv, Semantic Scholar and Hugging Face Daily Papers. Runs query expansion (taxonomy or LLM), merges and deduplicates results, enriches citation counts/venues via the Semantic Scholar batch API when needed, then applies year/venue/citation filters and returns ranked metadata.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural-language research intent or keyword query, e.g. 'diffusion text to 3d'."
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 5,
+            "description": "Maximum number of papers to return."
+          },
+          "years": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 1990, "maximum": 2100 },
+            "description": "Year filter interpreted as an inclusive min-max range, e.g. [2022, 2024]."
+          },
+          "venue_filter": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "NeurIPS", "ICML", "ICLR", "CVPR", "ICCV", "ECCV", "ACL",
+                "EMNLP", "NAACL", "KDD", "WWW", "SIGIR", "AAAI", "IJCAI",
+                "SIGGRAPH", "SIGGRAPH Asia", "ICRA", "IROS", "Nature",
+                "Science", "Nature Machine Intelligence",
+                "Nature Communications", "TPAMI", "JMLR", "TMLR"
+              ]
+            },
+            "description": "Restrict to top conferences/journals (aliases are matched tolerantly)."
+          },
+          "min_citations": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Minimum citation count (triggers Semantic Scholar enrichment)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["arxiv", "semantic_scholar", "huggingface_daily", "paperswithcode"]
+            },
+            "description": "Data-source subset. Default: arxiv + semantic_scholar."
+          }
+        },
+        "required": ["query"]
+      },
+      "returns": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/PaperMetadata" }
+      }
+    },
+    {
+      "name": "fetch_and_parse_paper",
+      "description": "Fetch one paper's full text and parse it into structured sections (Title/Authors/Affiliations/Abstract/Introduction/Method/Experiments/Limitations/Conclusion), figure captions, algorithm pseudo-code and display equations. Fallback chain: ar5iv HTML -> arXiv native HTML -> official PDF (PyMuPDF) -> metadata-only.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paper_id_or_url": {
+            "type": "string",
+            "description": "arXiv id ('2312.06621', versioned ok), arXiv abs/pdf/html URL, ar5iv URL, bare DOI ('10.1038/...') or 40-char Semantic Scholar paper id."
+          }
+        },
+        "required": ["paper_id_or_url"]
+      },
+      "returns": { "$ref": "#/schemas/PaperContent" }
+    },
+    {
+      "name": "analyze_single_paper",
+      "description": "Deep four-aspect analysis of one parsed paper: (1) Core Contribution & Novelty, (2) Technical Methodology Breakdown (architecture / losses / training / assumptions), (3) Experimental Validation (datasets / metrics / baselines / SOTA gains), (4) Critical Thinking (limitations & future work). Uses the configured LLM; falls back to an extractive heuristic when no LLM is available.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paper_content": {
+            "type": "object",
+            "description": "PaperContent object returned by fetch_and_parse_paper."
+          },
+          "analysis_mode": {
+            "type": "string",
+            "enum": ["single", "chain"],
+            "default": "single",
+            "description": "'single' = one JSON call; 'chain' = four sequential aspect prompts."
+          }
+        },
+        "required": ["paper_content"]
+      },
+      "returns": { "$ref": "#/schemas/AnalysisReport" }
+    },
+    {
+      "name": "synthesize_literature_review",
+      "description": "Synthesise multiple AnalysisReports into a survey-grade literature review: horizontal comparison matrix (Markdown), per-paper BibTeX entries, evolution timeline, open challenges and future directions. Returns a LiteratureReview object whose review_markdown attribute holds the full report.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Review topic / original research intent."
+          },
+          "reports": {
+            "type": "array",
+            "items": { "$ref": "#/schemas/AnalysisReport" },
+            "description": "Analysis reports produced by analyze_single_paper."
+          }
+        },
+        "required": ["topic", "reports"]
+      },
+      "returns": { "$ref": "#/schemas/LiteratureReview" }
+    },
+    {
+      "name": "run_ml_literature_analysis",
+      "description": "One-click end-to-end pipeline: search -> fetch & parse -> per-paper analysis -> cross-paper synthesis. Persists artifacts (literature_review.md, comparison_matrix.md, references.bib, full_result.json) and returns a SkillRunResult.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Natural-language research intent, e.g. 'score distillation for text-to-3D'."
+          },
+          "max_results": {
+            "type": "integer", "minimum": 1, "maximum": 25, "default": 10,
+            "description": "Number of papers to analyse."
+          },
+          "years": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "Inclusive year range, e.g. [2022, 2026]."
+          },
+          "venue_filter": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Venue names/aliases to restrict to."
+          },
+          "min_citations": {
+            "type": "integer", "minimum": 0, "default": 0,
+            "description": "Citation threshold."
+          },
+          "fetch_full_text": {
+            "type": "boolean", "default": true,
+            "description": "Set false to analyse abstracts only (much faster)."
+          },
+          "analysis_mode": {
+            "type": "string", "enum": ["single", "chain"], "default": "single",
+            "description": "LLM analysis strategy."
+          }
+        },
+        "required": ["topic"]
+      },
+      "returns": { "$ref": "#/schemas/SkillRunResult" }
+    }
+  ],
+  "schemas": {
+    "PaperMetadata": {
+      "type": "object",
+      "properties": {
+        "paper_id": { "type": "string" },
+        "source": { "type": "string", "enum": ["arxiv", "semantic_scholar", "huggingface_daily", "paperswithcode", "manual"] },
+        "title": { "type": "string" },
+        "authors": { "type": "array", "items": { "type": "string" } },
+        "abstract": { "type": "string" },
+        "arxiv_id": { "type": ["string", "null"] },
+        "doi": { "type": ["string", "null"] },
+        "year": { "type": ["integer", "null"] },
+        "venue": { "type": ["string", "null"] },
+        "citation_count": { "type": ["integer", "null"] },
+        "pdf_url": { "type": ["string", "null"] },
+        "abs_url": { "type": ["string", "null"] }
+      },
+      "required": ["paper_id", "title"]
+    },
+    "PaperContent": {
+      "type": "object",
+      "properties": {
+        "metadata": { "$ref": "#/schemas/PaperMetadata" },
+        "sections": {
+          "type": "object",
+          "description": "Canonical section name -> text. Keys: abstract, introduction, related_work, background, method, experiments, results, discussion, limitations, conclusion, references.",
+          "additionalProperties": { "type": "string" }
+        },
+        "extra_sections": { "type": "object", "additionalProperties": { "type": "string" } },
+        "affiliations": { "type": "array", "items": { "type": "string" } },
+        "figures": { "type": "array", "items": { "type": "object", "properties": { "figure_id": { "type": "string" }, "caption": { "type": "string" }, "kind": { "type": "string" } } } },
+        "algorithms": { "type": "array", "items": { "type": "object", "properties": { "algorithm_id": { "type": "string" }, "caption": { "type": "string" }, "pseudocode": { "type": "string" } } } },
+        "formulas": { "type": "array", "items": { "type": "object", "properties": { "latex": { "type": "string" }, "context": { "type": "string" } } } },
+        "extraction_source": { "type": "string", "enum": ["ar5iv", "arxiv_html", "pdf", "metadata_only"] },
+        "parse_warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["metadata"]
+    },
+    "AnalysisReport": {
+      "type": "object",
+      "properties": {
+        "paper_id": { "type": "string" },
+        "title": { "type": "string" },
+        "year": { "type": ["integer", "null"] },
+        "venue": { "type": ["string", "null"] },
+        "core_contribution": {
+          "type": "object",
+          "properties": {
+            "one_line_summary": { "type": "string" },
+            "motivation": { "type": "string" },
+            "novelty": { "type": "string" },
+            "pain_points_addressed": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "methodology": {
+          "type": "object",
+          "properties": {
+            "method_category": { "type": "string" },
+            "architecture": { "type": "string" },
+            "loss_functions": { "type": "string" },
+            "training_techniques": { "type": "string" },
+            "key_assumptions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "experiments": {
+          "type": "object",
+          "properties": {
+            "datasets": { "type": "array", "items": { "type": "string" } },
+            "metrics": { "type": "array", "items": { "type": "string" } },
+            "baselines": { "type": "array", "items": { "type": "string" } },
+            "sota_improvement": { "type": "string" },
+            "main_results_summary": { "type": "string" }
+          }
+        },
+        "critique": {
+          "type": "object",
+          "properties": {
+            "strengths": { "type": "array", "items": { "type": "string" } },
+            "limitations": { "type": "array", "items": { "type": "string" } },
+            "future_directions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "overall_assessment": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "generated_by": { "type": "string" }
+      },
+      "required": ["paper_id", "title"]
+    },
+    "LiteratureReview": {
+      "type": "object",
+      "properties": {
+        "topic": { "type": "string" },
+        "review_markdown": { "type": "string" },
+        "comparison_matrix_markdown": { "type": "string" },
+        "bibtex_entries": { "type": "array", "items": { "type": "string" } },
+        "evolution_timeline": { "type": "array", "items": { "type": "string" } },
+        "open_challenges": { "type": "array", "items": { "type": "string" } },
+        "future_directions": { "type": "array", "items": { "type": "string" } },
+        "generated_by": { "type": "string" }
+      },
+      "required": ["topic"]
+    },
+    "SkillRunResult": {
+      "type": "object",
+      "properties": {
+        "topic": { "type": "string" },
+        "papers": { "type": "array", "items": { "$ref": "#/schemas/PaperMetadata" } },
+        "reports": { "type": "array", "items": { "$ref": "#/schemas/AnalysisReport" } },
+        "review": { "$ref": "#/schemas/LiteratureReview" },
+        "artifacts": { "type": "object", "additionalProperties": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "stats": { "type": "object" }
+      },
+      "required": ["topic"]
+    }
+  }
+}
