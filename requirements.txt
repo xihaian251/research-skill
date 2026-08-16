@@ -1,0 +1,14 @@
+# Core runtime dependencies for ml_paper_analyst
+aiohttp>=3.9,<4.0
+pydantic>=2.5,<3.0
+beautifulsoup4>=4.12
+lxml>=4.9
+PyMuPDF>=1.24
+
+# LLM backend (OpenAI-compatible APIs: OpenAI, vLLM, Ollama, ...).
+# The skill degrades gracefully to heuristic analysis without it.
+openai>=1.30
+
+# Dev / test extras (uncomment as needed):
+# pytest>=8.0
+# pytest-asyncio>=0.23
