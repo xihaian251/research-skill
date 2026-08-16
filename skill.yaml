@@ -1,0 +1,103 @@
+# Skill metadata for ml_paper_analyst.
+# YAML mirror of manifest.json — some agent runtimes prefer YAML registration.
+
+name: ml_paper_analyst
+version: 1.0.0
+display_name: ML Paper Analyst
+license: MIT
+language: python
+python_requires: ">=3.9"
+package: ml_paper_analyst
+entrypoint:
+  module: ml_paper_analyst
+  class: MLPaperAnalystSkill
+  file: skill.py
+  pipeline_method: run
+  sync_wrapper: run_sync
+  cli: "python -m ml_paper_analyst <topic> [options]"
+
+description: >-
+  Production-grade, modular ML literature-analysis skill. Cross-source paper
+  search (arXiv, Semantic Scholar, Hugging Face Daily Papers, legacy
+  PapersWithCode), full-text extraction via ar5iv/arXiv HTML with PDF
+  fallback, four-aspect deep analysis (contribution, methodology,
+  experiments, critique), horizontal comparison matrix, BibTeX export and
+  survey-grade literature review generation.
+
+capabilities:
+  - id: searcher
+    name: Smart cross-source literature searcher
+    features:
+      - arXiv Atom API (keyword / arXiv id / DOI / author)
+      - Semantic Scholar Graph API with pagination
+      - Hugging Face Daily Papers (trending lens)
+      - Query expansion via curated taxonomy or LLM
+      - Year range, top-venue (aliases) and citation-threshold filters
+  - id: extractor
+    name: Multi-source parser
+    features:
+      - ar5iv / arXiv-native HTML (LaTeXML) structured parsing
+      - PDF fallback via PyMuPDF with heading heuristics
+      - Sections, affiliations, figure/table captions, algorithms, equations
+      - Metadata-only graceful degradation
+  - id: analyzer
+    name: Deep academic analysis engine
+    features:
+      - Core Contribution & Novelty
+      - Technical Methodology Breakdown
+      - Experimental Validation
+      - Critical Thinking (limitations / future work)
+      - Single-pass or four-step prompt chain; strict-JSON + repair retry
+      - Extractive heuristic fallback without an LLM
+  - id: synthesizer
+    name: Multi-paper synthesis & export
+    features:
+      - Markdown comparison matrix
+      - BibTeX generation (inproceedings / journal / arXiv preprint)
+      - Literature review with evolution timeline (LLM or template)
+      - Artifact persistence (md / bib / json)
+
+tools:
+  - name: search_ml_papers
+    callable: ml_paper_analyst.tools.search_ml_papers
+    async: true
+  - name: fetch_and_parse_paper
+    callable: ml_paper_analyst.tools.fetch_and_parse_paper
+    async: true
+  - name: analyze_single_paper
+    callable: ml_paper_analyst.tools.analyze_single_paper
+    async: true
+  - name: synthesize_literature_review
+    callable: ml_paper_analyst.tools.synthesize_literature_review
+    async: true
+  - name: run_ml_literature_analysis
+    callable: ml_paper_analyst.skill.MLPaperAnalystSkill.run
+    async: true
+
+config_schema:
+  env:
+    SEMANTIC_SCHOLAR_API_KEY: { type: string, required: false }
+    OPENAI_API_KEY: { type: string, required: false }
+    OPENAI_BASE_URL: { type: string, required: false }
+    MLPA_LLM_MODEL: { type: string, required: false, default: gpt-4o-mini }
+    MLPA_LLM_JSON_MODE: { type: boolean, required: false, default: false }
+    MLPA_CACHE_DIR: { type: path, required: false, default: "~/.cache/ml_paper_analyst" }
+    MLPA_OUTPUT_DIR: { type: path, required: false, default: "./mlpa_output" }
+    MLPA_MAX_CONCURRENCY: { type: integer, required: false, default: 6 }
+    MLPA_REQUEST_TIMEOUT: { type: number, required: false, default: 45 }
+    MLPA_MAX_RETRIES: { type: integer, required: false, default: 4 }
+    MLPA_ANALYSIS_MODE: { type: string, required: false, default: single, enum: [single, chain] }
+    MLPA_LLM_TEMPERATURE: { type: number, required: false, default: 0.2 }
+    MLPA_USER_AGENT_CONTACT: { type: string, required: false }
+
+reliability:
+  rate_limiting: per-host minimum-interval limiter (arXiv ~1 req/3s)
+  retries: exponential backoff with jitter, honours Retry-After
+  concurrency: bounded via asyncio.Semaphore (default 6)
+  caching: TTL JSON disk cache (search 7d, parsed content 30d)
+  degradation:
+    - HTML parse fails -> PDF fallback -> metadata-only
+    - LLM absent/fails -> heuristic analysis / template review
+
+dependencies_file: requirements.txt
+manifest_file: manifest.json
